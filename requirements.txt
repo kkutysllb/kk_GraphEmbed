@@ -29,3 +29,6 @@ python-dotenv>=1.0.1,<2.0.0
 loguru==0.7.0
 tqdm>=4.67.1,<5.0.0
 click==8.1.7
+
+# HTTP客户端
+requests>=2.31.0,<3.0.0

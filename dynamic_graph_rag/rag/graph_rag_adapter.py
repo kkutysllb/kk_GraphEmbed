@@ -10,7 +10,8 @@ from neo4j import GraphDatabase
 from influxdb_client import InfluxDBClient
 
 from ..llm.vllm_client import VLLMClient
-from .ollama_client import OllamaClient
+from ..llm.ollama_client import OllamaClient
+from ..llm.lmstudio_client import LMStudioClient
 import json
 
 class GraphRAGAdapter:
@@ -18,7 +19,7 @@ class GraphRAGAdapter:
     
     def __init__(
         self,
-        model_type: str = "ollama",  # 'ollama' or 'vllm'
+        model_type: str = "ollama",  # 'ollama', 'vllm', 或 'lmstudio'
         model_name: str = "deepseek-r1:32b",
         api_base: Optional[str] = None,
         neo4j_config: Optional[Dict] = None,
@@ -29,7 +30,7 @@ class GraphRAGAdapter:
         初始化GraphRAG适配器
         
         Args:
-            model_type: 使用的模型类型，可选 'ollama' 或 'vllm'
+            model_type: 使用的模型类型，可选 'ollama'、'vllm' 或 'lmstudio'
             model_name: 模型名称
             api_base: API基础URL
             neo4j_config: Neo4j配置字典，可选
@@ -49,6 +50,10 @@ class GraphRAGAdapter:
                 model_name=model_name,
                 api_base=api_base or "http://localhost:8000",
                 **kwargs
+            )
+        elif model_type == "lmstudio":
+            self.llm_client = LMStudioClient(
+                base_url=api_base or "http://localhost:12343"
             )
         else:
             raise ValueError(f"不支持的模型类型: {model_type}")
@@ -98,26 +103,53 @@ class GraphRAGAdapter:
             模型生成的响应
         """
         # 构建完整的提示
-        full_prompt = f"""查询：{query}\n\n"""
+        messages = []
         
+        # 添加系统提示
+        if system_prompt:
+            # 强化系统提示
+            enhanced_system_prompt = f"""你是一个专业的系统分析师。请严格按照以下角色设定和职责来回答所有问题：
+
+{system_prompt}
+
+重要提示：
+1. 你必须始终以系统分析师的身份回答
+2. 回答必须围绕系统分析、故障诊断和性能优化
+3. 不要偏离系统分析师的专业领域
+4. 如果问题超出系统分析范围，请明确指出
+5. 回答要简洁专业，不要包含思考过程
+6. 使用清晰的结构和专业的术语"""
+            messages.append({"role": "system", "content": enhanced_system_prompt})
+            
+        # 构建用户提示
+        user_prompt = f"""查询：{query}\n\n"""
         if context:
-            full_prompt += f"""上下文信息：
+            user_prompt += f"""上下文信息：
 {context}
 
 基于上述上下文信息回答用户的查询。如果上下文信息不足以回答问题，请明确指出。
 """
+        messages.append({"role": "user", "content": user_prompt})
         
         # 使用LLM生成响应
         if self.model_type == "ollama":
             return self.llm_client.generate(
-                prompt=full_prompt,
-                system_prompt=system_prompt,
+                prompt=user_prompt,
+                system_prompt=enhanced_system_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens
             )
-        else:  # vllm
+        elif self.model_type == "vllm":
             return self.llm_client.generate(
-                prompt=full_prompt,
+                prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+        else:  # lmstudio
+            return self.llm_client.generate(
+                prompt=user_prompt,
+                system_prompt=enhanced_system_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 **kwargs

@@ -147,9 +147,34 @@ API_CONFIG = {
     "workers": int(os.getenv("API_WORKERS", "4"))
 }
 
+# LM Studio配置
+LMSTUDIO_CONFIG = {
+    "base_url": os.getenv("LMSTUDIO_BASE_URL", "http://localhost:12343"),
+    # "model": os.getenv("LMSTUDIO_MODEL", "deepseek-r1-distill-qwen-32b"),
+    "model": os.getenv("LMSTUDIO_MODEL", "qwen2.5-14b-instruct"),
+    "max_tokens": int(os.getenv("LMSTUDIO_MAX_TOKENS", "2048")),
+    "temperature": float(os.getenv("LMSTUDIO_TEMPERATURE", "0.7")),
+    "top_p": float(os.getenv("LMSTUDIO_TOP_P", "0.9")),
+    "timeout": int(os.getenv("LMSTUDIO_TIMEOUT", "30000"))
+}
+
+# Ollama配置
+OLLAMA_CONFIG = {
+    "api_base": os.getenv("OLLAMA_API_BASE", "http://localhost:11434"),
+    "model_name": os.getenv("OLLAMA_MODEL_NAME", "deepseek-r1:32b"),
+    "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
+    "max_tokens": int(os.getenv("OLLAMA_MAX_TOKENS", "2048"))
+}
+
 # 兼容性函数，用于获取配置（兼容旧代码）
 def get_neo4j_config():
     return GRAPH_DB_CONFIG
 
 def get_influxdb_config():
-    return INFLUXDB_CONFIG 
+    return INFLUXDB_CONFIG
+
+def get_lmstudio_config():
+    return LMSTUDIO_CONFIG
+
+def get_ollama_config():
+    return OLLAMA_CONFIG 
