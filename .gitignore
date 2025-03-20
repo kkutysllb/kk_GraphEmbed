@@ -1,0 +1,48 @@
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+ENV/
+env/
+
+# IDE相关
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 操作系统相关
+.DS_Store
+Thumbs.db
+
+# 数据文件排除
+datasets/raw/
+datasets/processed/
+
+# 不排除目录本身，只排除内容
+!datasets/raw/.gitkeep
+!datasets/processed/.gitkeep
+
+# 日志和临时文件
+*.log
+*.tmp 

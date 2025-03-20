@@ -18,6 +18,64 @@ class TopologyConverter:
             'HOSTGROUP': 5,
             'STORAGEPOOL': 6
         }
+        # 定义节点类型描述
+        self.node_descriptions = {
+            'DC': {
+                'name': '数据中心',
+                'description': '物理数据中心，是所有IT资源的顶层容器'
+            },
+            'TENANT': {
+                'name': '租户',
+                'description': '数据中心中的逻辑隔离单元，拥有独立的资源配额和网络元素'
+            },
+            'NE': {
+                'name': '网元',
+                'description': '网络功能虚拟化(NFV)部署的功能单元，如AMF、SMF等5G核心网功能'
+            },
+            'VM': {
+                'name': '虚拟机',
+                'description': '承载网元功能的虚拟计算资源，由虚拟CPU、内存和存储组成'
+            },
+            'HOST': {
+                'name': '物理主机',
+                'description': '提供计算资源的物理服务器，用于运行虚拟机'
+            },
+            'HOSTGROUP': {
+                'name': '主机组',
+                'description': '物理主机的逻辑分组，通常基于硬件配置、位置或用途进行分组'
+            },
+            'TRU': {
+                'name': '存储池',
+                'description': '提供持久化存储资源的逻辑单元，为虚拟机提供存储空间'
+            }
+        }
+        # 定义边类型描述
+        self.edge_descriptions = {
+            'HAS_TENANT': {
+                'name': '拥有租户',
+                'description': '表示数据中心拥有或管理某个租户，这是资源分配的第一层级关系'
+            },
+            'HAS_NE': {
+                'name': '拥有网元',
+                'description': '表示某个租户拥有或管理特定的网络元素'
+            },
+            'HAS_VM': {
+                'name': '拥有虚拟机',
+                'description': '表示网络元素通过一个或多个虚拟机来实现其功能'
+            },
+            'DEPLOYED_ON': {
+                'name': '部署于',
+                'description': '表示虚拟机部署或运行在特定的物理主机上'
+            },
+            'BELONGS_TO': {
+                'name': '属于',
+                'description': '表示物理主机属于特定的主机组集合'
+            },
+            'HAS_STORAGE': {
+                'name': '拥有存储',
+                'description': '表示主机组关联或使用特定的存储池资源'
+            }
+        }
         # 用于存储已处理的节点ID，避免重复
         self.processed_nodes: Dict[str, Set[str]] = {
             'tenant': set(),
@@ -36,238 +94,19 @@ class TopologyConverter:
         }
         
     def extract_node_type(self, name: str, base_type: str) -> str:
-        """从节点名称中提取更细致的类型信息"""
-        if pd.isna(name):
-            return base_type
-        
+        """提取节点类型，使用通用类型标识"""
         if base_type == 'TENANT':
-            # NFV-P-XBXA-04A-HW-01-gs-B5G-HW 或 NFV-P-XBXA-04A-HW-01-xnq-BC5G-HW
-            parts = name.split('-')
-            # 提取位置代码和业务类型
-            location_code = ""
-            business_type = ""
-            
-            # 按照固定位置提取
-            if len(parts) >= 8:
-                location_code = parts[6].lower()  # 位置代码: gs/sn/nx/qh/xnq等
-                business_type = parts[7]  # 业务类型: B5G/C5G/XLW/CAT等
-            
-            # 如果固定位置未提取到，尝试正则表达式
-            if not location_code:
-                location_match = re.search(r'(gs|sn|nx|qh|xnq)', name.lower())
-                location_code = location_match.group(1) if location_match else ""
-            
-            if not business_type:
-                business_match = re.search(r'(B5G|C5G|BC5G|XLW|CAT|IMS)', name)
-                business_type = business_match.group(1) if business_match else ""
-            
-            # 组合类型标识
-            if location_code and business_type:
-                return f'TENANT_{location_code.upper()}_{business_type}'
-            elif location_code:
-                return f'TENANT_{location_code.upper()}'
-            elif business_type:
-                return f'TENANT_{business_type}'
-            
-            return f'TENANT_{name.replace("-", "_")}'
-            
+            return 'TENANT'
         elif base_type == 'NE':
-            # APP-XBXAgsAMFm001BHW-04AHW011 等
-            # 提取位置代码
-            location_match = re.search(r'(gs|sn|nx|qh|xnq)', name.lower())
-            location_code = location_match.group(1).upper() if location_match else ""
-            
-            # 提取网元类型 - 常见的5G核心网元类型
-            ne_types = [
-                'AMF', 'SMF', 'UPF', 'PCF', 'UDM', 'AUSF', 'NRF', 'NEF', 'NSSF', 
-                'CHF', 'DRASTP', 'DRASTPDB', 'DRASTPOMU', 'DRASIP', 'IAGW', 
-                'CATOMCTT', 'PUDRCSP', 'PCFCSP'
-            ]
-            ne_type = ""
-            for nt in ne_types:
-                if nt in name:
-                    ne_type = nt
-                    break
-            
-            # 组合类型标识
-            if location_code and ne_type:
-                return f'NE_{location_code}_{ne_type}'
-            elif location_code:
-                return f'NE_{location_code}'
-            elif ne_type:
-                return f'NE_{ne_type}'
-            
-            # 如果上述方法无法提取，尝试从特定部分提取特征
-            parts = name.split('-')
-            if len(parts) >= 2:
-                # 尝试从第二段提取XBXA后的特征
-                segment = parts[1]
-                feature_match = re.search(r'XBXA([a-zA-Z0-9]+)', segment)
-                if feature_match:
-                    feature = feature_match.group(1)
-                    # 提取字母部分作为特征
-                    letters_match = re.search(r'([a-zA-Z]+)', feature)
-                    if letters_match:
-                        return f'NE_{letters_match.group(1).upper()}'
-            
-            # 如果没有找到有意义的特征，使用原始名称
-            return f'NE_{name.replace("-", "_")}'
-            
+            return 'NE'
         elif base_type == 'VM':
-            # NFV-R-XBXA-04A-HW-01-VM-XBXAgsAMFm001BHW-OMU-0
-            
-            # 1. 提取位置代码
-            location_match = re.search(r'(gs|sn|nx|qh|xnq)', name.lower())
-            location_code = location_match.group(1).upper() if location_match else ""
-            
-            # 2. 提取网元类型 - 与虚机归属的网元相关
-            ne_type = ""
-            for nt in ['AMF', 'SMF', 'UPF', 'PCF', 'UDM', 'AUSF', 'NRF', 'NEF', 'NSSF', 'CHF', 'IAGW', 'DRASTP']:
-                if nt in name:
-                    ne_type = nt
-                    break
-            
-            # 3. 提取虚机自身功能类型
-            parts = name.split('-')
-            function_type = ""
-            
-            # 检查特定功能类型
-            if len(parts) >= 10:
-                function_part = parts[9]
-                # 去除下划线后的部分
-                function_type = function_part.split('_')[0] if '_' in function_part else function_part
-                
-                # 如果只是数字，尝试使用前一段
-                if function_type.isdigit() and len(parts) > 10:
-                    function_type = parts[8]
-            
-            # 特殊功能类型检查
-            if 'dual_active' in name.lower():
-                function_type = 'DUAL_ACTIVE'
-            elif 'dual_standby' in name.lower():
-                function_type = 'DUAL_STANDBY'
-            elif 'cluster' in name.lower():
-                function_type = 'CLUSTER'
-            elif 'OMU' in name:
-                function_type = 'OMU'
-            elif 'SIG' in name:
-                function_type = 'SIG'
-            elif 'PBU' in name:
-                function_type = 'PBU'
-            
-            # 组合类型标识，优先包含省份信息
-            type_elements = []
-            if location_code:
-                type_elements.append(location_code)
-            if ne_type:
-                type_elements.append(ne_type)
-            if function_type and function_type != "0":
-                type_elements.append(function_type)
-            
-            if type_elements:
-                return f'VM_{"_".join(type_elements)}'
-            
-            # 最后，提取VM后节点中的特征作为类型标识
-            vm_index = -1
-            for i, part in enumerate(parts):
-                if part == 'VM':
-                    vm_index = i
-                    break
-                
-            if vm_index > 0 and vm_index + 1 < len(parts):
-                feature_part = parts[vm_index + 1]
-                feature_match = re.search(r'XBXA([a-zA-Z0-9]+)', feature_part)
-                if feature_match:
-                    feature = feature_match.group(1)
-                    letters_match = re.search(r'([a-zA-Z]+)', feature)
-                    if letters_match:
-                        return f'VM_{letters_match.group(1).upper()}'
-                    
-            # 如果都没提取到，使用原始名称
-            return f'VM_{name.replace("-", "_")}'
-            
+            return 'VM'
         elif base_type == 'HOST':
-            # NFV-D-XBXA-04A-1405-0D20-S-SRV-09
-            parts = name.split('-')
-            
-            # 提取位置、机房和类型信息
-            location = parts[3] if len(parts) > 3 else ""  # XBXA
-            room = parts[4] if len(parts) > 4 else ""  # 04A
-            rack_info = parts[6] if len(parts) > 6 else ""  # S
-            host_type = parts[8] if len(parts) > 8 else ""  # SRV
-            
-            # 组合类型标识
-            type_elements = []
-            if location:
-                type_elements.append(location)
-            if room:
-                type_elements.append(room)
-            if rack_info:
-                type_elements.append(rack_info)
-            if host_type:
-                type_elements.append(host_type)
-            
-            if type_elements:
-                return f'HOST_{"_".join(type_elements)}'
-            
-            return f'HOST_{name.replace("-", "_")}'
-            
+            return 'HOST'
         elif base_type == 'HOSTGROUP':
-            # NFV-HA-XBXA-04A-HW-01-SVIC07
-            parts = name.split('-')
-            
-            # 提取位置、机房和SVIC编号
-            location = parts[3] if len(parts) > 3 else ""  # XBXA
-            room = parts[4] if len(parts) > 4 else ""  # 04A
-            
-            # 提取SVIC编号
-            svic_match = re.search(r'(SVIC\d+)', name)
-            svic = svic_match.group(1) if svic_match else ""
-            
-            # 组合类型标识
-            type_elements = []
-            if location:
-                type_elements.append(location)
-            if room:
-                type_elements.append(room)
-            if svic:
-                type_elements.append(svic)
-            
-            if type_elements:
-                return f'HOSTGROUP_{"_".join(type_elements)}'
-            
-            return f'HOSTGROUP_{name.replace("-", "_")}'
-            
+            return 'HOSTGROUP'
         elif base_type == 'STORAGEPOOL':
-            # NFV-DSP-XBXA-04A-HW-01-TRU-02
-            parts = name.split('-')
-            
-            # 提取位置、机房和TRU编号
-            location = parts[3] if len(parts) > 3 else ""  # XBXA
-            room = parts[4] if len(parts) > 4 else ""  # 04A
-            
-            # 提取TRU编号
-            tru_match = re.search(r'TRU-(\d+)', name)
-            tru = f"TRU{tru_match.group(1)}" if tru_match else ""
-            
-            if not tru:
-                tru_match = re.search(r'TRU(\d+)', name)
-                tru = f"TRU{tru_match.group(1)}" if tru_match else ""
-            
-            # 组合类型标识
-            type_elements = []
-            if location:
-                type_elements.append(location)
-            if room:
-                type_elements.append(room)
-            if tru:
-                type_elements.append(tru)
-            
-            if type_elements:
-                return f'STORAGEPOOL_{"_".join(type_elements)}'
-            
-            return f'STORAGEPOOL_{name.replace("-", "_")}'
-        
+            return 'TRU'
         return base_type
         
     def load_data(self):
@@ -281,12 +120,15 @@ class TopologyConverter:
 
     def create_dc_node(self):
         """创建数据中心根节点"""
+        node_type = 'DC'
         dc_node = {
             'id': 'DC_XBXA_DC4',
-            'type': 'DC',
-            'level': self.node_levels['DC'],
+            'type': node_type,
+            'level': self.node_levels[node_type],
             'properties': {
-                'name': 'XBXA_DC4'
+                'name': 'XBXA_DC4',
+                'chinese_name': self.node_descriptions[node_type]['name'],
+                'description': self.node_descriptions[node_type]['description']
             }
         }
         self.graph['nodes'].append(dc_node)
@@ -310,22 +152,38 @@ class TopologyConverter:
         tenant_name = str(row['租户名称'])
         tenant_id = f"TENANT_{tenant_name}"
         if tenant_id not in self.processed_nodes['tenant']:
+            # 添加配额属性
+            tenant_vcpu = row['租户vCPU核数'] if '租户vCPU核数' in row and pd.notna(row['租户vCPU核数']) else 0
+            tenant_vmem = row['租户vMEM大小'] if '租户vMEM大小' in row and pd.notna(row['租户vMEM大小']) else 0
+            tenant_vdisk = row['租户vDISK大小'] if '租户vDISK大小' in row and pd.notna(row['租户vDISK大小']) else 0
+            
+            node_type = self.extract_node_type(tenant_name, 'TENANT')
             tenant_node = {
                 'id': tenant_id,
-                'type': self.extract_node_type(tenant_name, 'TENANT'),
+                'type': node_type,
                 'level': self.node_levels['TENANT'],
                 'properties': {
-                    'name': tenant_name
+                    'name': tenant_name,
+                    'chinese_name': self.node_descriptions['TENANT']['name'],
+                    'description': self.node_descriptions['TENANT']['description'],
+                    'vcpu': tenant_vcpu,
+                    'vmem': tenant_vmem,
+                    'vdisk': tenant_vdisk
                 }
             }
             self.graph['nodes'].append(tenant_node)
             # 添加与DC的边
             edge_key = f"DC_XBXA_DC4-{tenant_id}-HAS_TENANT"
             if edge_key not in self.processed_edges:
+                edge_type = 'HAS_TENANT'
                 self.graph['edges'].append({
                     'source': 'DC_XBXA_DC4',
                     'target': tenant_id,
-                    'type': 'HAS_TENANT'
+                    'type': edge_type,
+                    'properties': {
+                        'chinese_name': self.edge_descriptions[edge_type]['name'],
+                        'description': self.edge_descriptions[edge_type]['description']
+                    }
                 })
                 self.processed_edges.add(edge_key)
             self.processed_nodes['tenant'].add(tenant_id)
@@ -338,12 +196,23 @@ class TopologyConverter:
         tenant_id = f"TENANT_{tenant_name}"
         
         if ne_id not in self.processed_nodes['ne']:
+            # 添加配额属性
+            ne_vcpu = row['网元vCPU核数'] if '网元vCPU核数' in row and pd.notna(row['网元vCPU核数']) else 0
+            ne_vmem = row['网元vMEM大小'] if '网元vMEM大小' in row and pd.notna(row['网元vMEM大小']) else 0
+            ne_vdisk = row['网元vDISK大小'] if '网元vDISK大小' in row and pd.notna(row['网元vDISK大小']) else 0
+            
+            node_type = self.extract_node_type(ne_name, 'NE')
             ne_node = {
                 'id': ne_id,
-                'type': self.extract_node_type(ne_name, 'NE'),
+                'type': node_type,
                 'level': self.node_levels['NE'],
                 'properties': {
-                    'name': ne_name
+                    'name': ne_name,
+                    'chinese_name': self.node_descriptions['NE']['name'],
+                    'description': self.node_descriptions['NE']['description'],
+                    'vcpu': ne_vcpu,
+                    'vmem': ne_vmem,
+                    'vdisk': ne_vdisk
                 }
             }
             self.graph['nodes'].append(ne_node)
@@ -352,10 +221,15 @@ class TopologyConverter:
         # 添加与租户的边
         edge_key = f"{tenant_id}-{ne_id}-HAS_NE"
         if edge_key not in self.processed_edges:
+            edge_type = 'HAS_NE'
             self.graph['edges'].append({
                 'source': tenant_id,
                 'target': ne_id,
-                'type': 'HAS_NE'
+                'type': edge_type,
+                'properties': {
+                    'chinese_name': self.edge_descriptions[edge_type]['name'],
+                    'description': self.edge_descriptions[edge_type]['description']
+                }
             })
             self.processed_edges.add(edge_key)
 
@@ -367,15 +241,23 @@ class TopologyConverter:
         ne_id = f"NE_{ne_name}"
         
         if vm_id not in self.processed_nodes['vm']:
+            # 添加配额属性
+            vm_vcpu = row['虚拟机vCPU核数'] if '虚拟机vCPU核数' in row and pd.notna(row['虚拟机vCPU核数']) else 0
+            vm_vmem = row['虚拟机vMEM大小'] if '虚拟机vMEM大小' in row and pd.notna(row['虚拟机vMEM大小']) else 0
+            vm_vdisk = row['虚拟机vDISK大小'] if '虚拟机vDISK大小' in row and pd.notna(row['虚拟机vDISK大小']) else 0
+            
+            node_type = self.extract_node_type(vm_name, 'VM')
             vm_node = {
                 'id': vm_id,
-                'type': self.extract_node_type(vm_name, 'VM'),
+                'type': node_type,
                 'level': self.node_levels['VM'],
                 'properties': {
                     'name': vm_name,
-                    'cpu': row.get('CPU核数', 0),
-                    'memory': row.get('内存大小(GB)', 0),
-                    'disk': row.get('磁盘大小(GB)', 0)
+                    'chinese_name': self.node_descriptions['VM']['name'],
+                    'description': self.node_descriptions['VM']['description'],
+                    'vcpu': vm_vcpu,
+                    'vmem': vm_vmem,
+                    'vdisk': vm_vdisk
                 }
             }
             self.graph['nodes'].append(vm_node)
@@ -384,10 +266,15 @@ class TopologyConverter:
         # 添加与网元的边
         edge_key = f"{ne_id}-{vm_id}-HAS_VM"
         if edge_key not in self.processed_edges:
+            edge_type = 'HAS_VM'
             self.graph['edges'].append({
                 'source': ne_id,
                 'target': vm_id,
-                'type': 'HAS_VM'
+                'type': edge_type,
+                'properties': {
+                    'chinese_name': self.edge_descriptions[edge_type]['name'],
+                    'description': self.edge_descriptions[edge_type]['description']
+                }
             })
             self.processed_edges.add(edge_key)
 
@@ -399,14 +286,25 @@ class TopologyConverter:
         vm_id = f"VM_{vm_name}"
         
         if host_id not in self.processed_nodes['host']:
+            # 添加配额属性
+            host_cpu = row['主机CPU核数'] if '主机CPU核数' in row and pd.notna(row['主机CPU核数']) else 0
+            host_allocated_cpu = row['主机已分配CPU核数'] if '主机已分配CPU核数' in row and pd.notna(row['主机已分配CPU核数']) else 0
+            host_mem = row['主机内存大小'] if '主机内存大小' in row and pd.notna(row['主机内存大小']) else 0
+            host_allocated_mem = row['主机已分配内存大小'] if '主机已分配内存大小' in row and pd.notna(row['主机已分配内存大小']) else 0
+            
+            node_type = self.extract_node_type(host_name, 'HOST')
             host_node = {
                 'id': host_id,
-                'type': self.extract_node_type(host_name, 'HOST'),
+                'type': node_type,
                 'level': self.node_levels['HOST'],
                 'properties': {
                     'name': host_name,
-                    'total_cpu': row.get('主机CPU总核数', 0),
-                    'total_memory': row.get('主机内存总量(GB)', 0)
+                    'chinese_name': self.node_descriptions['HOST']['name'],
+                    'description': self.node_descriptions['HOST']['description'],
+                    'cpu': host_cpu,
+                    'allocated_cpu': host_allocated_cpu,
+                    'mem': host_mem,
+                    'allocated_mem': host_allocated_mem
                 }
             }
             self.graph['nodes'].append(host_node)
@@ -415,10 +313,15 @@ class TopologyConverter:
         # 添加虚拟机到主机的部署关系
         edge_key = f"{vm_id}-{host_id}-DEPLOYED_ON"
         if edge_key not in self.processed_edges:
+            edge_type = 'DEPLOYED_ON'
             self.graph['edges'].append({
                 'source': vm_id,
                 'target': host_id,
-                'type': 'DEPLOYED_ON'
+                'type': edge_type,
+                'properties': {
+                    'chinese_name': self.edge_descriptions[edge_type]['name'],
+                    'description': self.edge_descriptions[edge_type]['description']
+                }
             })
             self.processed_edges.add(edge_key)
 
@@ -430,12 +333,25 @@ class TopologyConverter:
         host_id = f"HOST_{host_name}"
         
         if hostgroup_id not in self.processed_nodes['hostgroup']:
+            # 添加配额属性
+            hostgroup_cpu = row['主机组CPU核数'] if '主机组CPU核数' in row and pd.notna(row['主机组CPU核数']) else 0
+            hostgroup_allocated_cpu = row['主机组已分配CPU核数'] if '主机组已分配CPU核数' in row and pd.notna(row['主机组已分配CPU核数']) else 0
+            hostgroup_mem = row['主机组内存大小'] if '主机组内存大小' in row and pd.notna(row['主机组内存大小']) else 0
+            hostgroup_allocated_mem = row['主机组已分配内存大小'] if '主机组已分配内存大小' in row and pd.notna(row['主机组已分配内存大小']) else 0
+            
+            node_type = self.extract_node_type(hostgroup_name, 'HOSTGROUP')
             hostgroup_node = {
                 'id': hostgroup_id,
-                'type': self.extract_node_type(hostgroup_name, 'HOSTGROUP'),
+                'type': node_type,
                 'level': self.node_levels['HOSTGROUP'],
                 'properties': {
-                    'name': hostgroup_name
+                    'name': hostgroup_name,
+                    'chinese_name': self.node_descriptions['HOSTGROUP']['name'],
+                    'description': self.node_descriptions['HOSTGROUP']['description'],
+                    'cpu': hostgroup_cpu,
+                    'allocated_cpu': hostgroup_allocated_cpu,
+                    'mem': hostgroup_mem,
+                    'allocated_mem': hostgroup_allocated_mem
                 }
             }
             self.graph['nodes'].append(hostgroup_node)
@@ -444,10 +360,15 @@ class TopologyConverter:
         # 添加主机到主机组的归属关系
         edge_key = f"{host_id}-{hostgroup_id}-BELONGS_TO"
         if edge_key not in self.processed_edges:
+            edge_type = 'BELONGS_TO'
             self.graph['edges'].append({
                 'source': host_id,
                 'target': hostgroup_id,
-                'type': 'BELONGS_TO'
+                'type': edge_type,
+                'properties': {
+                    'chinese_name': self.edge_descriptions[edge_type]['name'],
+                    'description': self.edge_descriptions[edge_type]['description']
+                }
             })
             self.processed_edges.add(edge_key)
 
@@ -459,14 +380,21 @@ class TopologyConverter:
         hostgroup_id = f"HOSTGROUP_{hostgroup_name}"
         
         if storagepool_id not in self.processed_nodes['storagepool']:
+            # 添加配额属性
+            storage_size = row['存储空间大小'] if '存储空间大小' in row and pd.notna(row['存储空间大小']) else 0
+            allocated_storage = row['已分配存储大小'] if '已分配存储大小' in row and pd.notna(row['已分配存储大小']) else 0
+            
+            node_type = self.extract_node_type(storagepool_name, 'STORAGEPOOL')
             storagepool_node = {
                 'id': storagepool_id,
-                'type': self.extract_node_type(storagepool_name, 'STORAGEPOOL'),
+                'type': node_type,
                 'level': self.node_levels['STORAGEPOOL'],
                 'properties': {
                     'name': storagepool_name,
-                    'total_capacity': row.get('存储池容量(GB)', 0),
-                    'used_capacity': row.get('存储池已用容量(GB)', 0)
+                    'chinese_name': self.node_descriptions['TRU']['name'],
+                    'description': self.node_descriptions['TRU']['description'],
+                    'storage_size': storage_size,
+                    'allocated_storage': allocated_storage
                 }
             }
             self.graph['nodes'].append(storagepool_node)
@@ -475,10 +403,15 @@ class TopologyConverter:
         # 添加与主机组的关系
         edge_key = f"{hostgroup_id}-{storagepool_id}-HAS_STORAGE"
         if edge_key not in self.processed_edges:
+            edge_type = 'HAS_STORAGE'
             self.graph['edges'].append({
                 'source': hostgroup_id,
                 'target': storagepool_id,
-                'type': 'HAS_STORAGE'
+                'type': edge_type,
+                'properties': {
+                    'chinese_name': self.edge_descriptions[edge_type]['name'],
+                    'description': self.edge_descriptions[edge_type]['description']
+                }
             })
             self.processed_edges.add(edge_key)
 
