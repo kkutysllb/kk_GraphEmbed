@@ -13,7 +13,7 @@ graphrag = "^2.1.0"
 pandas = "^2.0.3"
 numpy = "^1.24.3"
 scipy = "^1.10.1"
-networkx = "^3.1"
+networkx = ">=3.4.2,<4.0.0"
 fastapi = {version = "^0.103.1", optional = true}
 uvicorn = {version = "^0.23.2", optional = true}
 python-dotenv = "^1.0.0"
@@ -45,4 +45,4 @@ line_length = 88
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = "test_*.py" 
+python_files = "test_*.py"

@@ -42,7 +42,6 @@ datasets/simulated/*
 !datasets/raw/.gitkeep
 !datasets/processed/.gitkeep
 !datasets/simulated/.gitkeep
-graphrag/
 
 # 日志文件
 *.log
