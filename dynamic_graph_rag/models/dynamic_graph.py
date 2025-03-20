@@ -1,38 +1,41 @@
 """
 动态图模型模块
-集成图数据和时序数据，提供动态图的查询和处理功能
+集成图数据和时序数据，提供动态图的查询和分析功能
 """
 
 import logging
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Union, Any
 
 from .graph_data import GraphData
-# from .time_series_data import TimeSeriesData
-from ..data.simulated.time_series_generator import TimeSeriesGenerator
-from ..config.settings import NODE_TYPES
+from ..db.influxdb_client import InfluxDBClient
+from ..config.settings import NODE_TYPES, INFLUXDB_CONFIG
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class DynamicGraph:
-    """动态图模型类，集成图数据和时序数据"""
+    """动态图模型类，集成图数据和时序数据的查询分析"""
     
-    def __init__(self, graph_data=None, time_series_data=None):
+    def __init__(self, graph_data=None, influxdb_client=None):
         """初始化动态图实例
         
         Args:
             graph_data: 可选的GraphData实例
-            time_series_data: 可选的TimeSeriesGenerator实例
+            influxdb_client: 可选的InfluxDB客户端实例
         """
         # 初始化图数据组件
         self.graph = graph_data or GraphData()
         
         # 初始化时序数据组件
-        self.ts = time_series_data or TimeSeriesGenerator()
+        self.influxdb = influxdb_client or InfluxDBClient(
+            url=INFLUXDB_CONFIG["url"],
+            token=INFLUXDB_CONFIG["token"],
+            org=INFLUXDB_CONFIG["org"],
+            bucket=INFLUXDB_CONFIG["bucket"]
+        )
         
         # 设置日志级别
         self.logger = logging.getLogger(__name__)
@@ -62,20 +65,17 @@ class DynamicGraph:
             return node
             
         # 获取指标数据
-        metrics_df = self.ts.get_node_metrics(node_id, node_type, start_time, end_time)
+        metrics = self.influxdb.query_metrics(
+            node_id=node_id,
+            node_type=node_type,
+            start_time=start_time,
+            end_time=end_time
+        )
         
         # 构建结果
         result = dict(node)
+        result['metrics'] = metrics
         
-        # 转换指标数据为列表
-        if not metrics_df.empty:
-            # 将DataFrame重置索引，转换为记录列表
-            metrics_df = metrics_df.reset_index()
-            metrics_list = metrics_df.to_dict('records')
-            result['metrics'] = metrics_list
-        else:
-            result['metrics'] = []
-            
         return result
     
     def get_subgraph_with_metrics(self, center_node_id: str, depth: int = 1, 
@@ -93,7 +93,7 @@ class DynamicGraph:
         """
         # 获取子图
         subgraph = self.graph.find_subgraph(center_node_id, depth)
-        if not subgraph or 'nodes' not in subgraph or not subgraph['nodes']:
+        if not subgraph:
             logger.warning(f"找不到以 {center_node_id} 为中心的子图")
             return {}
             
@@ -105,20 +105,16 @@ class DynamicGraph:
             
             if node_id and node_type and node_type.upper() in NODE_TYPES:
                 # 获取该节点的指标数据
-                metrics_df = self.ts.get_node_metrics(node_id, node_type, start_time, end_time)
+                metrics = self.influxdb.query_metrics(
+                    node_id=node_id,
+                    node_type=node_type,
+                    start_time=start_time,
+                    end_time=end_time
+                )
                 
-                # 复制节点属性
+                # 复制节点属性并添加指标数据
                 node_with_metrics = dict(node)
-                
-                # 添加指标数据
-                if not metrics_df.empty:
-                    # 转换为列表格式
-                    metrics_df = metrics_df.reset_index()
-                    metrics_list = metrics_df.to_dict('records')
-                    node_with_metrics['metrics'] = metrics_list
-                else:
-                    node_with_metrics['metrics'] = []
-                    
+                node_with_metrics['metrics'] = metrics
                 nodes_with_metrics.append(node_with_metrics)
             else:
                 # 对于没有时序数据的节点，直接添加
@@ -160,11 +156,17 @@ class DynamicGraph:
                 continue
                 
             # 检测异常
-            anomalies = self.ts.detect_anomalies(node_id, node_type, metric, threshold, window)
+            anomalies = self.influxdb.detect_anomalies(
+                node_id=node_id,
+                node_type=node_type,
+                metric=metric,
+                threshold=threshold,
+                window=window
+            )
+            
             if anomalies:
-                # 复制节点属性
+                # 复制节点属性并添加异常信息
                 node_with_anomalies = dict(node)
-                # 添加异常信息
                 node_with_anomalies['anomalies'] = anomalies
                 anomalous_nodes.append(node_with_anomalies)
                 
@@ -192,26 +194,20 @@ class DynamicGraph:
             logger.warning(f"找不到节点: {node_id}")
             return {}
             
-        # 获取重采样的指标数据
-        resampled_df = self.ts.resample_metrics(node_id, node_type, interval, start_time, end_time)
-        
-        # 过滤指定的指标
-        if metrics and not resampled_df.empty:
-            # 确保保留节点ID和类型
-            columns_to_keep = ['node_id', 'node_type'] + [m for m in metrics if m in resampled_df.columns]
-            resampled_df = resampled_df[columns_to_keep]
+        # 获取历史指标数据
+        history = self.influxdb.query_metrics(
+            node_id=node_id,
+            node_type=node_type,
+            metrics=metrics,
+            start_time=start_time,
+            end_time=end_time,
+            interval=interval
+        )
         
         # 构建结果
         result = dict(node)
+        result['history'] = history
         
-        # 添加历史数据
-        if not resampled_df.empty:
-            resampled_df = resampled_df.reset_index()
-            history = resampled_df.to_dict('records')
-            result['history'] = history
-        else:
-            result['history'] = []
-            
         return result
     
     def find_related_anomalies(self, node_id: str, relationship_type: str = None, 
@@ -223,7 +219,7 @@ class DynamicGraph:
             node_id: 节点ID
             relationship_type: 关系类型
             direction: 关系方向
-            metric: 指标名称，如果为None则检查每个节点类型的默认指标
+            metric: 指标名称
             threshold: 异常阈值
             window: 时间窗口
             
@@ -244,25 +240,19 @@ class DynamicGraph:
             if not related_id or not related_type or related_type.upper() not in NODE_TYPES:
                 continue
                 
-            # 确定要检查的指标
-            metrics_to_check = []
-            if metric:
-                metrics_to_check = [metric]
-            else:
-                # 使用该节点类型的默认指标
-                metrics_to_check = NODE_TYPES[related_type.upper()]["metrics"]
-                
-            # 检查每个指标
-            all_anomalies = []
-            for m in metrics_to_check:
-                anomalies = self.ts.detect_anomalies(related_id, related_type, m, threshold, window)
-                all_anomalies.extend(anomalies)
-                
-            if all_anomalies:
-                # 复制节点属性
+            # 检测异常
+            anomalies = self.influxdb.detect_anomalies(
+                node_id=related_id,
+                node_type=related_type,
+                metric=metric,
+                threshold=threshold,
+                window=window
+            )
+            
+            if anomalies:
+                # 复制节点属性并添加异常信息
                 node_with_anomalies = dict(related_node)
-                # 添加异常信息
-                node_with_anomalies['anomalies'] = all_anomalies
+                node_with_anomalies['anomalies'] = anomalies
                 anomalous_nodes.append(node_with_anomalies)
                 
         return anomalous_nodes
@@ -360,8 +350,20 @@ class DynamicGraph:
             return {}
             
         # 获取两个节点的指标数据
-        df1 = self.ts.get_node_metrics(node_id, node1_type, start_time, end_time)
-        df2 = self.ts.get_node_metrics(related_node_id, node2_type, start_time, end_time)
+        df1 = self.influxdb.query_metrics(
+            node_id=node_id,
+            node_type=node1_type,
+            metrics=[m for m, _ in metrics],
+            start_time=start_time,
+            end_time=end_time
+        )
+        df2 = self.influxdb.query_metrics(
+            node_id=related_node_id,
+            node_type=node2_type,
+            metrics=[m for _, m in metrics],
+            start_time=start_time,
+            end_time=end_time
+        )
         
         if df1.empty or df2.empty:
             logger.warning("缺少指标数据")
@@ -431,7 +433,12 @@ class DynamicGraph:
                 continue
                 
             # 获取最近的指标数据
-            recent_metrics = self.ts.get_recent_metrics(node_id, node_type, limit=1)
+            recent_metrics = self.influxdb.query_metrics(
+                node_id=node_id,
+                node_type=node_type,
+                metrics=[metric],
+                limit=1
+            )
             if recent_metrics.empty or metric not in recent_metrics.columns:
                 continue
                 
@@ -480,7 +487,11 @@ class DynamicGraph:
             health_status = dict(node)
             
             if include_metrics:
-                recent_metrics = self.ts.get_recent_metrics(node_id, node_type, limit=1)
+                recent_metrics = self.influxdb.query_metrics(
+                    node_id=node_id,
+                    node_type=node_type,
+                    limit=1
+                )
                 if not recent_metrics.empty:
                     # 提取最新的指标值
                     metrics = recent_metrics.iloc[0].to_dict()
@@ -489,7 +500,11 @@ class DynamicGraph:
                     # 检查是否有异常
                     for metric in NODE_TYPES[node_type.upper()]["metrics"]:
                         if metric in recent_metrics.columns:
-                            anomalies = self.ts.detect_anomalies(node_id, node_type, metric)
+                            anomalies = self.influxdb.detect_anomalies(
+                                node_id=node_id,
+                                node_type=node_type,
+                                metric=metric
+                            )
                             if anomalies:
                                 if 'anomalies' not in health_status:
                                     health_status['anomalies'] = {}
@@ -526,7 +541,11 @@ class DynamicGraph:
                 if include_metrics:
                     has_anomaly = False
                     for metric in NODE_TYPES[node_type.upper()]["metrics"]:
-                        anomalies = self.ts.detect_anomalies(node_id, node_type, metric)
+                        anomalies = self.influxdb.detect_anomalies(
+                            node_id=node_id,
+                            node_type=node_type,
+                            metric=metric
+                        )
                         if anomalies:
                             has_anomaly = True
                             if 'anomalies' not in node_health:
@@ -584,7 +603,12 @@ class DynamicGraph:
             }
             
         # 获取趋势分析
-        trend_analysis = self.ts.analyze_trend(node_id, node_type, metric, window)
+        trend_analysis = self.influxdb.analyze_trend(
+            node_id=node_id,
+            node_type=node_type,
+            metric=metric,
+            window=window
+        )
         
         # 如果分析成功，添加节点信息
         if trend_analysis.get("status") == "success":
@@ -630,7 +654,7 @@ class DynamicGraph:
             }
             
         # 获取预测结果
-        prediction = self.ts.predict_metrics(
+        prediction = self.influxdb.predict_metrics(
             node_id=node_id,
             node_type=node_type,
             metric=metric,
@@ -666,7 +690,7 @@ class DynamicGraph:
             
             # 如果有异常预测值，分析可能的影响传播
             predicted_values = [p["predicted_value"] for p in prediction["predictions"]]
-            current_stats = self.ts.get_metric_statistics(node_type, metric, f"-{history_window}")
+            current_stats = self.influxdb.get_metric_statistics(node_type, metric, f"-{history_window}")
             
             if current_stats and "mean" in current_stats and "stddev" in current_stats:
                 mean = current_stats["mean"]
