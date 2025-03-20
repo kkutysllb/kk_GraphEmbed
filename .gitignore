@@ -1,10 +1,9 @@
-# Python相关
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -16,6 +15,7 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -24,25 +24,61 @@ var/
 venv/
 ENV/
 env/
+.env
+.venv
+.conda/
 
-# IDE相关
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# 操作系统相关
 .DS_Store
-Thumbs.db
 
-# 数据文件排除
-datasets/raw/
-datasets/processed/
-
-# 不排除目录本身，只排除内容
+# 项目特定
+datasets/raw/*
+datasets/processed/*
+datasets/simulated/*
 !datasets/raw/.gitkeep
 !datasets/processed/.gitkeep
+!datasets/simulated/.gitkeep
+graphrag/
 
-# 日志和临时文件
+# 日志文件
 *.log
-*.tmp 
+logs/
+
+# 数据库文件
+*.db
+*.sqlite3
+
+# 大文件和数据文件
+*.csv
+*.json
+*.parquet
+*.pkl
+*.h5
+*.hdf5
+*.gz
+*.zip
+*.tar
+*.rar
+*.7z
+
+# 配置文件中的敏感信息
+config/secrets.yaml
+config/credentials.yaml
+.env
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# 测试覆盖率
+.coverage
+htmlcov/
+
+# 缓存
+.cache/
+.pytest_cache/
+.mypy_cache/ 

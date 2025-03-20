@@ -1,0 +1,31 @@
+# GraphRAG统一查询层项目依赖
+
+# 核心依赖
+neo4j==5.15.0
+influxdb-client==1.36.1
+graphrag==0.1.0
+
+# 数据处理
+pandas==2.0.3
+numpy==1.24.3
+scipy==1.10.1
+
+# 图分析
+networkx==3.1
+
+# Web框架(可选，用于API)
+fastapi==0.103.1
+uvicorn==0.23.2
+
+# 开发工具
+pytest==7.4.0
+pytest-cov==4.1.0
+black==23.7.0
+isort==5.12.0
+flake8==6.1.0
+
+# 其他实用工具
+python-dotenv==1.0.0
+loguru==0.7.0
+tqdm==4.66.1
+click==8.1.7 
