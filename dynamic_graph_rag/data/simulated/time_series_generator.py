@@ -317,6 +317,10 @@ class TimeSeriesGenerator:
         node_id = node_info['id']
         node_type = node_info['type']
         
+        # DC和TENANT类型节点不需要生成指标
+        if node_type in ['DC', 'TENANT']:
+            return {}
+        
         # 获取该节点类型的指标定义
         metrics = self.metrics_config.get(node_type)
         if not metrics:

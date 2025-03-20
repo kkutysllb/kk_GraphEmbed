@@ -69,7 +69,7 @@ NODE_TYPES = [
     "VM",          # 虚拟机
     "HOST",        # 物理主机
     "HOSTGROUP",   # 主机组
-    "STORAGEPOOL", # 存储池
+    "TRU",         # 存储池
 ]
 
 # 边类型配置
@@ -102,7 +102,7 @@ METRICS = {
         {"name": "success_rate", "unit": "%", "sampling_interval": "60s"},
         {"name": "resource_usage", "unit": "%", "sampling_interval": "60s"}
     ],
-    "STORAGEPOOL": [
+    "TRU": [
         {"name": "usage", "unit": "%", "sampling_interval": "300s"},
         {"name": "iops", "unit": "IOPS", "sampling_interval": "60s"},
         {"name": "latency", "unit": "ms", "sampling_interval": "60s"},
