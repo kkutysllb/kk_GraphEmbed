@@ -16,7 +16,8 @@ def main():
         adapter = GraphRAGAdapter(
             model_type="lmstudio",
             # model_name="deepseek-r1-distill-qwen-32b"
-            model_name="qwen2.5-14b-instruct"
+            # model_name="qwen2.5-14b-instruct"
+            model_name = "mistral-small-3.1-24b-instruct-2503"
         )
         
         # 测试简单查询
