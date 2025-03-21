@@ -17,7 +17,7 @@ class LMStudioClient:
         """
         self.base_url = base_url.rstrip('/')
         # self.model = "deepseek-r1-distill-qwen-32b"
-        self.model = "qwen2.5-14b-instruct"
+        self.model = "mistral-small-3.1-24b-instruct-2503"
         
     def _make_request(self, endpoint: str, method: str = "POST", **kwargs) -> Dict[str, Any]:
         """
