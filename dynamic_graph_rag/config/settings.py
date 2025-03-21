@@ -151,7 +151,7 @@ API_CONFIG = {
 LMSTUDIO_CONFIG = {
     "base_url": os.getenv("LMSTUDIO_BASE_URL", "http://localhost:12343"),
     # "model": os.getenv("LMSTUDIO_MODEL", "deepseek-r1-distill-qwen-32b"),
-    "model": os.getenv("LMSTUDIO_MODEL", "qwen2.5-14b-instruct"),
+    "model": os.getenv("LMSTUDIO_MODEL", "mistral-small-3.1-24b-instruct-2503"),
     "max_tokens": int(os.getenv("LMSTUDIO_MAX_TOKENS", "2048")),
     "temperature": float(os.getenv("LMSTUDIO_TEMPERATURE", "0.7")),
     "top_p": float(os.getenv("LMSTUDIO_TOP_P", "0.9")),
@@ -166,6 +166,14 @@ OLLAMA_CONFIG = {
     "max_tokens": int(os.getenv("OLLAMA_MAX_TOKENS", "2048"))
 }
 
+# vLLM配置
+VLLM_CONFIG = {
+    "api_url": os.getenv("VLLM_API_URL", "http://localhost:8000/v1"),
+    "model_name": os.getenv("VLLM_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-1M"),
+    "temperature": float(os.getenv("VLLM_TEMPERATURE", "0.7")),
+    "max_tokens": int(os.getenv("VLLM_MAX_TOKENS", "1024"))
+}
+
 # 兼容性函数，用于获取配置（兼容旧代码）
 def get_neo4j_config():
     return GRAPH_DB_CONFIG
@@ -177,4 +185,7 @@ def get_lmstudio_config():
     return LMSTUDIO_CONFIG
 
 def get_ollama_config():
-    return OLLAMA_CONFIG 
+    return OLLAMA_CONFIG
+
+def get_vllm_config():
+    return VLLM_CONFIG 

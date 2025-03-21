@@ -1,19 +1,26 @@
 import requests
 import json
+import os
 from loguru import logger
 
 class OllamaClient:
-    def __init__(self, model_name="deepseek-r1:32b", api_base="http://localhost:11434"):
+    def __init__(self, model_name=None, api_base=None, temperature=None, max_tokens=None):
         """
         初始化Ollama客户端
         
         Args:
-            model_name: Ollama模型名称，默认使用deepseek-r1:32b
-            api_base: Ollama API地址，默认使用本地地址
+            model_name: Ollama模型名称，如果为None则从环境变量加载
+            api_base: Ollama API地址，如果为None则从环境变量加载
+            temperature: 温度参数，如果为None则从环境变量加载
+            max_tokens: 最大生成token数，如果为None则从环境变量加载
         """
-        self.model_name = model_name
-        self.api_base = api_base.rstrip('/')
-        logger.info(f"初始化Ollama客户端: model={model_name}, api_base={api_base}")
+        # 从环境变量加载配置
+        self.model_name = model_name or os.getenv("OLLAMA_MODEL_NAME", "deepseek-r1:32b")
+        self.api_base = (api_base or os.getenv("OLLAMA_API_BASE", "http://localhost:11434")).rstrip('/')
+        self.temperature = temperature or float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
+        self.max_tokens = max_tokens or int(os.getenv("OLLAMA_MAX_TOKENS", "2048"))
+        
+        logger.info(f"初始化Ollama客户端: model={self.model_name}, api_base={self.api_base}")
         
         # 测试API连接
         try:
@@ -22,26 +29,30 @@ class OllamaClient:
         except Exception as e:
             logger.warning(f"API连接测试失败: {str(e)}")
         
-    def generate(self, prompt, system_prompt=None, temperature=0.7, max_tokens=2048):
+    def generate(self, prompt, system_prompt=None, temperature=None, max_tokens=None):
         """
         生成文本响应
         
         Args:
             prompt: 用户输入的提示
             system_prompt: 系统提示（角色设定）
-            temperature: 采样温度
-            max_tokens: 最大生成token数
+            temperature: 采样温度，如果为None则使用实例默认值
+            max_tokens: 最大生成token数，如果为None则使用实例默认值
             
         Returns:
             生成的文本响应
         """
         url = f"{self.api_base}/api/generate"
         
+        # 使用参数值或实例默认值
+        actual_temperature = temperature if temperature is not None else self.temperature
+        actual_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+        
         payload = {
             "model": self.model_name,
             "prompt": prompt,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
+            "temperature": actual_temperature,
+            "max_tokens": actual_max_tokens,
         }
         
         if system_prompt:

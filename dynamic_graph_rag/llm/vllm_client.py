@@ -3,16 +3,17 @@ vLLM客户端模块，用于与本地部署的vLLM服务通信
 """
 import json
 import requests
+import os
 from typing import Dict, List, Optional, Union
 
 class VLLMClient:
     """vLLM客户端类"""
     
     def __init__(self, 
-                 api_url: str = "http://localhost:8000/v1",
-                 model_name: str = "Qwen2.5-vl-7b",
-                 temperature: float = 0.3,
-                 max_tokens: int = 1024):
+                 api_url: str = None,
+                 model_name: str = None,
+                 temperature: float = None,
+                 max_tokens: int = None):
         """初始化vLLM客户端
         
         Args:
@@ -21,10 +22,11 @@ class VLLMClient:
             temperature: 采样温度
             max_tokens: 最大生成token数
         """
-        self.api_url = api_url.rstrip("/")
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        # 从环境变量加载配置，如果参数未提供则使用环境变量的值
+        self.api_url = (api_url or os.getenv("VLLM_API_URL", "http://localhost:8000/v1")).rstrip("/")
+        self.model_name = model_name or os.getenv("VLLM_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-1M")
+        self.temperature = temperature or float(os.getenv("VLLM_TEMPERATURE", "0.7"))
+        self.max_tokens = max_tokens or int(os.getenv("VLLM_MAX_TOKENS", "1024"))
     
     def generate(self, prompt: str, system_prompt: str = None) -> str:
         """生成文本

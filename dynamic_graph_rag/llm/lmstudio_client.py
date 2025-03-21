@@ -1,5 +1,6 @@
 import requests
 import json
+import os
 from typing import Dict, Any, Optional, List
 import logging
 
@@ -16,8 +17,8 @@ class LMStudioClient:
             base_url: LM Studio API的基础URL
         """
         self.base_url = base_url.rstrip('/')
-        # self.model = "deepseek-r1-distill-qwen-32b"
-        self.model = "mistral-small-3.1-24b-instruct-2503"
+        # 从环境变量中加载模型名称，如果未设置则使用默认值
+        self.model = os.getenv("LMSTUDIO_MODEL", "mistral-small-3.1-24b-instruct-2503")
         
     def _make_request(self, endpoint: str, method: str = "POST", **kwargs) -> Dict[str, Any]:
         """
