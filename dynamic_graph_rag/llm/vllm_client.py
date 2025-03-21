@@ -11,7 +11,7 @@ class VLLMClient:
     def __init__(self, 
                  api_url: str = "http://localhost:8000/v1",
                  model_name: str = "Qwen2.5-vl-7b",
-                 temperature: float = 0.7,
+                 temperature: float = 0.3,
                  max_tokens: int = 1024):
         """初始化vLLM客户端
         
@@ -26,11 +26,12 @@ class VLLMClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
     
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, system_prompt: str = None) -> str:
         """生成文本
         
         Args:
             prompt: 输入提示
+            system_prompt: 系统提示，可选
             
         Returns:
             生成的文本
@@ -38,12 +39,16 @@ class VLLMClient:
         Raises:
             Exception: 请求失败时抛出异常
         """
+        # 构建消息列表
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
         # 构建请求数据
         data = {
             "model": self.model_name,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "stream": False

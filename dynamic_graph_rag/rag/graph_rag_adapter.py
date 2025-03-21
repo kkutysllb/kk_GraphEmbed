@@ -48,7 +48,7 @@ class GraphRAGAdapter:
         elif model_type == "vllm":
             self.llm_client = VLLMClient(
                 model_name=model_name,
-                api_base=api_base or "http://localhost:8000",
+                api_url=api_base or "http://localhost:8000/v1",
                 **kwargs
             )
         elif model_type == "lmstudio":
@@ -140,11 +140,12 @@ class GraphRAGAdapter:
                 max_tokens=max_tokens
             )
         elif self.model_type == "vllm":
+            # 更新客户端的参数
+            self.llm_client.temperature = temperature
+            self.llm_client.max_tokens = max_tokens
             return self.llm_client.generate(
                 prompt=user_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs
+                system_prompt=system_prompt
             )
         else:  # lmstudio
             return self.llm_client.generate(
