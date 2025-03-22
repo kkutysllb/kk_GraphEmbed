@@ -8,6 +8,7 @@ import pandas as pd
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 from ..config.settings import get_influxdb_config, NODE_TYPES
+import time
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -37,11 +38,36 @@ class InfluxDBManager:
     def connect(self):
         """建立与InfluxDB数据库的连接"""
         try:
-            self.client = InfluxDBClient(url=self.url, token=self.token, org=self.org)
-            self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
+            # 从配置读取超时设置，默认为60秒
+            config = get_influxdb_config()
+            timeout_ms = config.get("timeout", 60000)
+            
+            # 使用明确的超时设置创建客户端
+            self.client = InfluxDBClient(
+                url=self.url, 
+                token=self.token, 
+                org=self.org,
+                timeout=timeout_ms,
+                enable_gzip=True  # 启用压缩以减少传输数据量
+            )
+            
+            # 配置写API
+            from influxdb_client.client.write_api import WriteOptions
+            write_options = WriteOptions(
+                batch_size=50,  # 小批量写入
+                flush_interval=5000,  # 5秒刷新一次
+                jitter_interval=0,
+                retry_interval=3000,
+                max_retries=3,
+                max_retry_delay=15000,
+                exponential_base=2
+            )
+            self.write_api = self.client.write_api(write_options=write_options)
+            
+            # 其他API
             self.query_api = self.client.query_api()
             self.delete_api = self.client.delete_api()
-            logger.info(f"已成功连接到InfluxDB: {self.url}")
+            logger.info(f"已成功连接到InfluxDB: {self.url} (超时设置: {timeout_ms}ms)")
             
             # 检查存储桶是否存在，不存在则创建
             self._ensure_bucket_exists()
@@ -129,24 +155,68 @@ class InfluxDBManager:
             logger.error(f"写入指标失败: {str(e)}")
             return False
     
-    def write_metrics_batch(self, points_list):
-        """批量写入指标数据
+    def write_metrics_batch(self, points_list, retry_count=3, retry_delay=2):
+        """
+        批量写入一组指标点
         
         Args:
-            points_list: Point对象列表
+            points_list: InfluxDB Point对象列表
+            retry_count: 重试次数
+            retry_delay: 重试延迟（秒）
             
         Returns:
-            是否成功
+            bool: 成功返回True，失败返回False
         """
+        # 空检查
+        if not points_list:
+            return True
+            
+        # 确保客户端已经连接
         if not self.client:
-            if not self.connect():
+            success = self.connect()
+            if not success:
+                logger.error("无法连接到InfluxDB，写入失败")
                 return False
         
         try:
-            self.write_api.write(bucket=self.bucket, record=points_list)
-            return True
+            batch_size = len(points_list)
+            max_attempt = retry_count + 1  # 初始尝试 + 重试次数
+            
+            # 多次尝试写入
+            for attempt in range(1, max_attempt + 1):
+                try:
+                    # 使用synchronous写入模式，减少内存使用
+                    self.write_api.write(bucket=self.bucket, record=points_list)
+                    
+                    # 写入成功跳出循环
+                    if attempt > 1:
+                        logger.info(f"批量写入成功，第{attempt}次尝试，{batch_size}个数据点")
+                    return True
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    # 判断错误类型
+                    if "timeout" in error_msg.lower():
+                        if attempt < max_attempt:
+                            # 超时错误，进行重试
+                            retry_time = retry_delay * attempt
+                            logger.warning(f"批量写入超时，将在{retry_time}秒后进行第{attempt+1}次尝试: {error_msg}")
+                            time.sleep(retry_time)
+                        else:
+                            # 达到最大重试次数
+                            logger.error(f"批量写入在{max_attempt}次尝试后仍然超时: {error_msg}")
+                            return False
+                    else:
+                        # 非超时错误，立即失败或重试
+                        if attempt < max_attempt:
+                            logger.warning(f"批量写入失败，将在{retry_delay}秒后重试 ({attempt}/{max_attempt}): {error_msg}")
+                            time.sleep(retry_delay)
+                        else:
+                            logger.error(f"批量写入最终失败: {error_msg}")
+                            return False
+                            
         except Exception as e:
-            logger.error(f"批量写入指标失败: {str(e)}")
+            logger.error(f"写入批次时发生未预期的错误: {str(e)}")
             return False
     
     def query_metrics(self, measurement, node_id=None, fields=None, start_time=None, end_time=None):

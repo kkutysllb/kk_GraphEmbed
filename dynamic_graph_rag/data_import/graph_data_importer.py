@@ -497,6 +497,360 @@ class GraphDataImporter:
         
         return report_content
 
+    def export_graph_schema(self, output_dir=None):
+        """
+        从Neo4j数据库导出图谱Schema到CSV文件
+        
+        Args:
+            output_dir: 输出目录，默认为当前目录
+            
+        Returns:
+            dict: 导出结果，包含节点标签、关系类型和属性信息
+        """
+        logger.info("开始从Neo4j导出图谱Schema...")
+        
+        # 设置默认输出目录
+        if output_dir is None:
+            output_dir = Path.cwd() / "graph_schema"
+        else:
+            output_dir = Path(output_dir)
+        
+        # 确保输出目录存在
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        schema_info = {
+            "node_labels": [],
+            "relationship_types": [],
+            "node_properties": {},
+            "relationship_properties": {}
+        }
+        
+        try:
+            with self.driver.session(database=self.database) as session:
+                # 1. 获取所有节点标签
+                logger.info("获取节点标签...")
+                label_query = """
+                CALL db.labels() YIELD label
+                RETURN label, count(label) as count
+                ORDER BY label
+                """
+                labels_result = session.run(label_query)
+                labels_df = pd.DataFrame([dict(record) for record in labels_result])
+                
+                if not labels_df.empty:
+                    # 保存节点标签到CSV
+                    labels_file = output_dir / "node_labels.csv"
+                    labels_df.to_csv(labels_file, index=False)
+                    logger.info(f"节点标签已保存到 {labels_file}")
+                    schema_info["node_labels"] = labels_df["label"].tolist()
+                
+                # 2. 获取所有关系类型
+                logger.info("获取关系类型...")
+                rel_query = """
+                CALL db.relationshipTypes() YIELD relationshipType
+                RETURN relationshipType, count(relationshipType) as count
+                ORDER BY relationshipType
+                """
+                rel_result = session.run(rel_query)
+                rel_df = pd.DataFrame([dict(record) for record in rel_result])
+                
+                if not rel_df.empty:
+                    # 保存关系类型到CSV
+                    rel_file = output_dir / "relationship_types.csv"
+                    rel_df.to_csv(rel_file, index=False)
+                    logger.info(f"关系类型已保存到 {rel_file}")
+                    schema_info["relationship_types"] = rel_df["relationshipType"].tolist()
+                
+                # 3. 获取每种节点标签的属性
+                logger.info("获取节点属性...")
+                node_props = {}
+                for label in schema_info["node_labels"]:
+                    # 简单查询，只获取属性名称和频率
+                    simple_props_query = f"""
+                    MATCH (n:{label})
+                    UNWIND keys(n) AS property
+                    RETURN DISTINCT property, 
+                           count(property) as frequency
+                    ORDER BY property
+                    """
+                    
+                    try:
+                        props_result = session.run(simple_props_query)
+                        props_df = pd.DataFrame([dict(record) for record in props_result])
+                        
+                        if not props_df.empty:
+                            # 保存节点属性到CSV
+                            props_file = output_dir / f"node_{label}_properties.csv"
+                            props_df.to_csv(props_file, index=False)
+                            logger.info(f"{label}节点属性已保存到 {props_file}")
+                            node_props[label] = props_df["property"].tolist()
+                    except Exception as e:
+                        logger.warning(f"获取{label}节点属性时出错: {str(e)}")
+                
+                schema_info["node_properties"] = node_props
+                
+                # 4. 获取每种关系类型的属性
+                logger.info("获取关系属性...")
+                rel_props = {}
+                for rel_type in schema_info["relationship_types"]:
+                    # 使用简单查询，不依赖apoc
+                    rel_props_query = f"""
+                    MATCH ()-[r:{rel_type}]->()
+                    UNWIND keys(r) AS property
+                    RETURN DISTINCT property, 
+                           count(property) as frequency
+                    ORDER BY property
+                    """
+                    try:
+                        rel_props_result = session.run(rel_props_query)
+                        rel_props_df = pd.DataFrame([dict(record) for record in rel_props_result])
+                        
+                        if not rel_props_df.empty:
+                            # 保存关系属性到CSV
+                            rel_props_file = output_dir / f"relationship_{rel_type}_properties.csv"
+                            rel_props_df.to_csv(rel_props_file, index=False)
+                            logger.info(f"{rel_type}关系属性已保存到 {rel_props_file}")
+                            rel_props[rel_type] = rel_props_df["property"].tolist()
+                    except Exception as e:
+                        logger.warning(f"获取{rel_type}关系属性时出错: {str(e)}")
+                
+                schema_info["relationship_properties"] = rel_props
+                
+                # 5. 生成节点-关系-节点模式摘要
+                logger.info("获取图谱模式摘要...")
+                pattern_query = """
+                MATCH (source)-[rel]->(target)
+                RETURN DISTINCT labels(source)[0] as source_label,
+                       type(rel) as relationship_type,
+                       labels(target)[0] as target_label,
+                       count(*) as frequency
+                ORDER BY source_label, relationship_type, target_label
+                """
+                try:
+                    pattern_result = session.run(pattern_query)
+                    pattern_df = pd.DataFrame([dict(record) for record in pattern_result])
+                    
+                    if not pattern_df.empty:
+                        # 保存图谱模式到CSV
+                        pattern_file = output_dir / "graph_patterns.csv"
+                        pattern_df.to_csv(pattern_file, index=False)
+                        logger.info(f"图谱模式已保存到 {pattern_file}")
+                        schema_info["patterns"] = pattern_df.to_dict(orient="records")
+                except Exception as e:
+                    logger.warning(f"获取图谱模式时出错: {str(e)}")
+                
+                # 6. 导出综合摘要
+                try:
+                    summary = {
+                        "node_labels_count": len(schema_info["node_labels"]),
+                        "relationship_types_count": len(schema_info["relationship_types"]),
+                        "node_labels": schema_info["node_labels"],
+                        "relationship_types": schema_info["relationship_types"],
+                        "patterns": schema_info.get("patterns", []),
+                        "node_properties_count": {label: len(props) for label, props in schema_info["node_properties"].items()},
+                        "relationship_properties_count": {rel: len(props) for rel, props in schema_info["relationship_properties"].items()}
+                    }
+                    
+                    # 保存为JSON格式
+                    import json
+                    summary_file = output_dir / "schema_summary.json"
+                    with open(summary_file, 'w', encoding='utf-8') as f:
+                        json.dump(summary, f, ensure_ascii=False, indent=2)
+                    logger.info(f"Schema摘要已保存到 {summary_file}")
+                except Exception as e:
+                    logger.warning(f"生成综合摘要时出错: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"导出Schema时出错: {str(e)}")
+        
+        logger.info(f"Schema导出完成，所有文件已保存到目录: {output_dir}")
+        return schema_info
+
+    def export_graph_data(self, output_dir=None, format='json', combine=False):
+        """
+        从Neo4j数据库导出所有节点和边数据
+        
+        Args:
+            output_dir: 输出目录，默认为当前目录
+            format: 输出格式，支持'json'或'csv'
+            combine: 是否将节点和边合并为一个文件，仅在format='json'时有效
+            
+        Returns:
+            tuple: (导出的节点数量, 导出的边数量)
+        """
+        logger.info(f"开始从Neo4j导出图数据，格式为{format}...")
+        
+        # 设置默认输出目录
+        if output_dir is None:
+            output_dir = Path.cwd() / "graph_data_export"
+        else:
+            output_dir = Path(output_dir)
+        
+        # 确保输出目录存在
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 导出统计信息
+        stats = {
+            "nodes_exported": 0,
+            "edges_exported": 0,
+            "node_types": {},
+            "edge_types": {}
+        }
+        
+        try:
+            with self.driver.session(database=self.database) as session:
+                # 1. 获取并导出所有节点数据
+                logger.info("导出所有节点数据...")
+                
+                # 查询所有节点，包括其标签和属性
+                # 使用elementId替代已弃用的id函数
+                node_query = """
+                MATCH (n)
+                RETURN 
+                    elementId(n) as neo4j_id, 
+                    labels(n) as labels, 
+                    properties(n) as properties
+                """
+                
+                node_result = session.run(node_query)
+                node_records = []
+                
+                # 处理节点数据
+                for record in node_result:
+                    neo4j_id = record["neo4j_id"]
+                    labels = record["labels"]
+                    props = record["properties"]
+                    
+                    # 添加标签信息，使输出更完整
+                    node_data = {
+                        "id": props.get("id", str(neo4j_id)),  # 使用节点的id属性，如果没有则使用Neo4j内部ID
+                        "neo4j_id": neo4j_id,
+                        "labels": labels,
+                        **props  # 展开所有属性
+                    }
+                    
+                    node_records.append(node_data)
+                    
+                    # 更新统计信息
+                    stats["nodes_exported"] += 1
+                    
+                    # 按标签类型统计
+                    primary_label = labels[0] if labels else "UNKNOWN"
+                    if primary_label not in stats["node_types"]:
+                        stats["node_types"][primary_label] = 0
+                    stats["node_types"][primary_label] += 1
+                
+                # 2. 获取并导出所有边数据
+                logger.info("导出所有边数据...")
+                
+                # 查询所有边，包括其类型、属性和连接的节点
+                # 使用elementId替代已弃用的id函数
+                edge_query = """
+                MATCH (source)-[r]->(target)
+                RETURN 
+                    elementId(r) as neo4j_id,
+                    type(r) as type,
+                    properties(r) as properties,
+                    elementId(source) as source_neo4j_id,
+                    properties(source).id as source_id,
+                    elementId(target) as target_neo4j_id,
+                    properties(target).id as target_id
+                """
+                
+                edge_result = session.run(edge_query)
+                edge_records = []
+                
+                # 处理边数据
+                for record in edge_result:
+                    neo4j_id = record["neo4j_id"]
+                    edge_type = record["type"]
+                    props = record["properties"]
+                    source_id = record["source_id"] or str(record["source_neo4j_id"])
+                    target_id = record["target_id"] or str(record["target_neo4j_id"])
+                    
+                    # 创建边数据结构
+                    edge_data = {
+                        "id": str(neo4j_id),  # 边通常没有ID属性，使用Neo4j内部ID
+                        "neo4j_id": neo4j_id,
+                        "type": edge_type,
+                        "source": source_id,
+                        "target": target_id,
+                        **props  # 展开所有属性
+                    }
+                    
+                    edge_records.append(edge_data)
+                    
+                    # 更新统计信息
+                    stats["edges_exported"] += 1
+                    
+                    # 按关系类型统计
+                    if edge_type not in stats["edge_types"]:
+                        stats["edge_types"][edge_type] = 0
+                    stats["edge_types"][edge_type] += 1
+                
+                # 3. 保存导出的数据
+                if combine and format == 'json':
+                    # 将节点和边合并为一个JSON文件
+                    combined_data = {
+                        "nodes": node_records,
+                        "edges": edge_records
+                    }
+                    
+                    combined_file = output_dir / "graph_data.json"
+                    with open(combined_file, 'w', encoding='utf-8') as f:
+                        json.dump(combined_data, f, ensure_ascii=False, indent=2)
+                    
+                    logger.info(f"导出了 {stats['nodes_exported']} 个节点和 {stats['edges_exported']} 条边到 {combined_file}")
+                else:
+                    # 分别保存节点和边
+                    # 保存节点数据
+                    nodes_file = output_dir / f"nodes.{format}"
+                    if format == 'json':
+                        with open(nodes_file, 'w', encoding='utf-8') as f:
+                            json.dump(node_records, f, ensure_ascii=False, indent=2)
+                    elif format == 'csv':
+                        # 处理嵌套结构以便CSV导出
+                        flat_nodes = []
+                        for node in node_records:
+                            flat_node = {k: str(v) if isinstance(v, (list, dict)) else v 
+                                        for k, v in node.items()}
+                            flat_nodes.append(flat_node)
+                        
+                        nodes_df = pd.DataFrame(flat_nodes)
+                        nodes_df.to_csv(nodes_file, index=False)
+                    
+                    logger.info(f"导出了 {stats['nodes_exported']} 个节点到 {nodes_file}")
+                    
+                    # 保存边数据
+                    edges_file = output_dir / f"edges.{format}"
+                    if format == 'json':
+                        with open(edges_file, 'w', encoding='utf-8') as f:
+                            json.dump(edge_records, f, ensure_ascii=False, indent=2)
+                    elif format == 'csv':
+                        # 处理嵌套结构以便CSV导出
+                        flat_edges = []
+                        for edge in edge_records:
+                            flat_edge = {k: str(v) if isinstance(v, (list, dict)) else v 
+                                        for k, v in edge.items()}
+                            flat_edges.append(flat_edge)
+                        
+                        edges_df = pd.DataFrame(flat_edges)
+                        edges_df.to_csv(edges_file, index=False)
+                    
+                    logger.info(f"导出了 {stats['edges_exported']} 条边到 {edges_file}")
+                
+                # 4. 导出统计摘要
+                stats_file = output_dir / "export_stats.json"
+                with open(stats_file, 'w', encoding='utf-8') as f:
+                    json.dump(stats, f, ensure_ascii=False, indent=2)
+                logger.info(f"导出统计信息已保存到 {stats_file}")
+                
+        except Exception as e:
+            logger.error(f"导出图数据时出错: {str(e)}")
+        
+        logger.info(f"图数据导出完成，文件已保存到目录: {output_dir}")
+        return (stats["nodes_exported"], stats["edges_exported"])
+
     def import_data(self, json_file_path, clear_existing=False, report_file=None):
         """
         执行完整的导入过程
@@ -563,17 +917,25 @@ class GraphDataImporter:
 @click.option('--password', help='Neo4j密码')
 @click.option('--database', help='Neo4j数据库名')
 @click.option('--report', type=click.Path(), help='导入报告输出路径')
-def main(json_file, clear, uri, user, password, database, report):
+@click.option('--export-schema', is_flag=True, help='导出数据库Schema')
+@click.option('--schema-dir', type=click.Path(), help='Schema导出目录路径')
+def main(json_file, clear, uri, user, password, database, report, export_schema, schema_dir):
     """从JSON文件导入图数据到Neo4j数据库"""
     try:
-        click.echo(f"开始从 {json_file} 导入数据...")
-        
         importer = GraphDataImporter(
             uri=uri,
             user=user,
             password=password,
             database=database
         )
+        
+        if export_schema:
+            click.echo(f"开始从Neo4j导出Schema到 {schema_dir or 'graph_schema'}...")
+            importer.export_graph_schema(output_dir=schema_dir)
+            click.echo("Schema导出完成")
+            return
+            
+        click.echo(f"开始从 {json_file} 导入数据...")
         
         stats = importer.import_data(
             json_file_path=json_file,
